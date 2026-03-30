@@ -1,0 +1,122 @@
+#!/bin/bash
+# valheim-mod-manager is called by valheim-updater when MOD_MANAGER=true.
+# It runs vmm to install, update and remove Thunderstore mods in the BepInEx
+# installation so that it matches MOD_MANAGER_MODS or $mod_manager_mods_file.
+
+. /usr/local/etc/valheim/defaults
+. /usr/local/etc/valheim/common
+
+
+run_vmm() {
+    vmm --config "$mod_manager_config" "$@"
+}
+
+
+desired_mods() {
+    if [ -n "$MOD_MANAGER_MODS" ]; then
+        tr -s ', \t' '\n' <<< "$MOD_MANAGER_MODS"
+    elif [ -f "$mod_manager_mods_file" ]; then
+        sed -e 's/#.*//' "$mod_manager_mods_file" | tr -s ', \t' '\n'
+    fi | sed -e '/^$/d' | sort -u
+}
+
+
+installed_mods() {
+    run_vmm list --format json | jq -c .
+}
+
+
+# vmm records dependencies in mods.yml without marking them as such, so any
+# recorded mod that isn't listed is removed here and `vmm install` brings back
+# the dependencies that are still needed. The loader is never removed: it is
+# installed by bepinex-updater, not by us.
+remove_stale_mods() {
+    local -A wanted=()
+    local stale=()
+    local mod
+    local name
+
+    for mod in "$@"; do
+        if [[ "$mod" =~ ^(.+)-[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            mod=${BASH_REMATCH[1]}
+        fi
+        wanted["$mod"]=1
+    done
+
+    while IFS= read -r name; do
+        if [ -z "$name" ] || [ "$name" = "$mod_manager_loader" ] || [ -n "${wanted[$name]+_}" ]; then
+            continue
+        fi
+        stale+=("$name")
+    done < <(run_vmm list --format json | jq -r '.[].full_name')
+
+    if [ ${#stale[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    info "Mod list changed - removing unlisted mods (dependencies still needed are reinstalled): ${stale[*]}"
+    run_vmm uninstall "${stale[@]}"
+}
+
+
+main() {
+    local desired=()
+    local before
+    local after
+    local install_status=0
+    local cleaned=true
+
+    if [ "$MOD_MANAGER" != true ]; then
+        debug "Mod manager is disabled - skipping"
+        return 0
+    fi
+
+    mapfile -t desired < <(desired_mods)
+    if [ ${#desired[@]} -eq 0 ]; then
+        debug "No mods in MOD_MANAGER_MODS or $mod_manager_mods_file - skipping vmm run"
+        return 0
+    fi
+    info "Thunderstore mods: ${desired[*]}"
+
+    mkdir -p "$MOD_MANAGER_CACHE_DIR"
+    write_mod_manager_config
+    cd /config || fatal "Could not cd /config"
+
+    if ! run_vmm update manifest; then
+        error "vmm failed to update the Thunderstore manifest - retrying later"
+        return 1
+    fi
+
+    if ! before=$(installed_mods); then
+        error "vmm failed to list installed mods - retrying later"
+        return 1
+    fi
+
+    if [ "$(printf '%s\n' "${desired[@]}")" != "$(cat "$mod_manager_applied" 2> /dev/null)" ]; then
+        if ! remove_stale_mods "${desired[@]}"; then
+            warn "vmm could not remove unlisted mods - see the vmm output above"
+            cleaned=false
+        fi
+    fi
+
+    info "Installing and updating Thunderstore mods"
+    if ! run_vmm install "${desired[@]}"; then
+        error "vmm failed to install some mods - retrying later"
+        install_status=1
+    elif [ "$cleaned" = true ]; then
+        printf '%s\n' "${desired[@]}" > "$mod_manager_applied"
+    fi
+
+    after=$(installed_mods)
+    if [ "$before" != "$after" ]; then
+        info "Thunderstore mods changed - signaling server restart"
+        write_restart_file updated
+    else
+        info "Thunderstore mods are up to date"
+    fi
+
+    return $install_status
+}
+
+
+main

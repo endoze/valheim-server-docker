@@ -2,7 +2,7 @@
 
 ![Valheim](https://raw.githubusercontent.com/community-valheim-tools/valheim-server-docker/main/misc/Logo_valheim.png "Valheim")
 
-Valheim Server in a Docker Container (with [BepInEx](#bepinexpack-valheim) and [ValheimPlus](#valheimplus) support)  
+Valheim Server in a Docker Container (with [BepInEx](#bepinexpack-valheim), [ValheimPlus](#valheimplus), and [mod manager](#valheim-mod-manager-vmm) support)
 This project is hosted at [https://github.com/community-valheim-tools/valheim-server-docker](https://github.com/community-valheim-tools/valheim-server-docker)
 
 # Table of contents
@@ -48,6 +48,9 @@ This project is hosted at [https://github.com/community-valheim-tools/valheim-se
 - [Modding](#modding)
   - [BepInExPack Valheim](#bepinexpack-valheim)
     - [Configuration](#configuration)
+  - [Valheim Mod Manager (vmm)](#valheim-mod-manager-vmm)
+    - [Mod list configuration](#mod-list-configuration)
+    - [Updates](#updates-2)
   - [ValheimPlus](#valheimplus)
     - [Updates](#updates-1)
     - [Configuration](#configuration-1)
@@ -160,6 +163,10 @@ Without it you will see a message `Warning: failed to set thread priority` in th
 | `VALHEIM_PLUS_REPO`         | `Grantapher/ValheimPlus` | Which ValheimPlus Github repo to use. Useful for switching to forks.                                                                                                                                                                                                                   |
 | `VALHEIM_PLUS_RELEASE`      | `latest`                 | Which version of [ValheimPlus](https://github.com/valheimPlus/ValheimPlus) to download. Will default to latest available. To specify a specific tag set to `tags/0.9.9.8`                                                                                                              |
 | `BEPINEX`                   | `false`                  | Whether [BepInExPack Valheim](https://valheim.thunderstore.io/package/denikson/BepInExPack_Valheim/) mod should be loaded (config in `/config/bepinex`, plugins in `/config/bepinex/plugins`, patchers in `/config/bepinex/patchers`). Can not be used together with `VALHEIM_PLUS`.   |
+| `MOD_MANAGER`               | `false`                  | Enable the mod manager (`vmm`) to automatically install and update mods from [Thunderstore](https://valheim.thunderstore.io/). Requires `BEPINEX=true`. See [Valheim Mod Manager (vmm)](#valheim-mod-manager-vmm).                                                                     |
+| `MOD_MANAGER_MODS`          |                          | Space-separated list of mods to install in `Author-ModName` format (e.g. `ValheimModding-Jotunn`), or `Author-ModName-1.2.3` to pin a version. If not set, the list is read from `/config/vmm_mods.txt`.                                                                               |
+| `MOD_MANAGER_LOG_LEVEL`     | `error`                  | Log verbosity for `vmm`. Valid values: `error`, `warn`, `info`, `debug`, `trace`.                                                                                                                                                                                                      |
+| `MOD_MANAGER_CACHE_DIR`     | `/config/vmm_cache`      | Directory where `vmm` keeps the Thunderstore package index and its download and extraction cache.                                                                                                                                                                                      |
 | `SUPERVISOR_HTTP`           | `false`                  | Turn on supervisor's http server                                                                                                                                                                                                                                                       |
 | `SUPERVISOR_HTTP_PORT`      | `9001`                   | Set supervisor's http server port                                                                                                                                                                                                                                                      |
 | `SUPERVISOR_HTTP_USER`      | `admin`                  | Supervisor http server username                                                                                                                                                                                                                                                        |
@@ -758,6 +765,49 @@ Only files a previous sync installed are removed, so plugins that came with the 
 ### Configuration
 
 See [Mod config from Environment Variables](#mod-config-from-environment-variables)
+
+## Valheim Mod Manager (vmm)
+
+**Enable with**
+| Variable | Value |
+|----------|----------|
+| `BEPINEX` | `true` |
+| `MOD_MANAGER` | `true` |
+
+The Valheim Mod Manager (`vmm`) is a built-in tool that automatically downloads, installs, and keeps mods up to date alongside the server. Mods are sourced from [Thunderstore](https://valheim.thunderstore.io/). It requires `BEPINEX=true` and cannot be used together with `VALHEIM_PLUS=true`.
+
+Mods are installed into the BepInEx installation using the same layout as r2modman: plugins go to `BepInEx/plugins/Author-ModName/` and patchers to `BepInEx/patchers/Author-ModName/`. Default config files a mod ships are written to `/config/bepinex` unless a file with that name already exists. The server is automatically restarted whenever mods are installed, updated, or removed.
+
+### Mod list configuration
+
+Set `MOD_MANAGER_MODS` to a space-separated list of mods in `Author-ModName` format:
+
+```
+-e MOD_MANAGER=true \
+-e BEPINEX=true \
+-e MOD_MANAGER_MODS="ValheimModding-Jotunn RandyKnapp-EpicLoot"
+```
+
+Alternatively, leave `MOD_MANAGER_MODS` unset and list the mods in `/config/vmm_mods.txt`, one per line. Lines starting with `#` are ignored:
+
+```
+ValheimModding-Jotunn
+RandyKnapp-EpicLoot
+# Pin a version by appending it
+ValheimModding-HookGenPatcher-0.0.4
+```
+
+Dependencies declared in each mod's manifest are resolved and installed automatically.
+
+The container writes `/config/vmm_config.toml` on every run, so edits to it are overwritten. To inspect the installation, run `vmm` from `/config`, where it picks up that file:
+
+```
+docker exec -w /config valheim-server vmm list
+```
+
+### Updates
+
+Installed mods are checked for updates on the same `UPDATE_CRON` schedule as the Valheim server. When a mod is added, removed, or updated the server is automatically restarted. Mods removed from the mod list are uninstalled. If that finds mod folders `vmm` does not track in `BepInEx/plugins` (for example an `Author-ModName` folder synced from `/config/bepinex/plugins`), `vmm` refuses to remove anything and logs which folders are in the way; move them or add them to the mod list.
 
 ## ValheimPlus
 

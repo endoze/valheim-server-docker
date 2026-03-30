@@ -49,6 +49,13 @@ bepinex_zipfile=BepInEx.zip                      # Name of the BepInEx archive
 bepinex_sync_manifest=.synced_from_config        # Record of what the last /config sync
                                                  # installed, so it can be pruned later
 
+# Mod Manager (vmm)
+mod_manager_wrapper=/usr/local/bin/valheim-mod-manager
+mod_manager_config=/config/vmm_config.toml       # Generated on every run
+mod_manager_mods_file=/config/vmm_mods.txt       # Mod list used when MOD_MANAGER_MODS is unset
+mod_manager_loader=denikson-BepInExPack_Valheim  # Installed by bepinex-updater, never removed by vmm
+mod_manager_applied="$bepinex_install_path/.vmm_applied" # Beside mods.yml so a merge resets both
+
 # Collection of PID files
 valheim_server_pidfile=/var/run/valheim/valheim-server.pid
 valheim_updater_pidfile=/var/run/valheim/valheim-updater.pid
@@ -363,6 +370,16 @@ update_server_status() {
 
 write_bannedlist() {
     write_serverlist banned "$BANNEDLIST_IDS"
+}
+
+
+write_mod_manager_config() {
+    debug "Writing vmm config to $mod_manager_config"
+    cat > "$mod_manager_config" <<EOF
+log_level = "$MOD_MANAGER_LOG_LEVEL"
+game_dir = "$bepinex_install_path"
+data_dir = "$MOD_MANAGER_CACHE_DIR"
+EOF
 }
 
 
